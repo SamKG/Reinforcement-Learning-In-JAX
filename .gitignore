@@ -1,0 +1,5 @@
+checkpoints/
+data/
+.vscode
+**/__pycache__/
+*.gif
