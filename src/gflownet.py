@@ -13,25 +13,27 @@ class FlowNetwork(eqx.Module):
         self,
         obs_space_size: int,
         observation_hidden_features: List[int],
+        action_space_size: int,
         key: jax.random.KeyArray,
     ):
-        self.net = MLP([obs_space_size + 1] + observation_hidden_features + [1], key)
+        self.net = MLP(
+            [obs_space_size] + observation_hidden_features + [action_space_size],
+            key,
+        )
 
-    @eqx.filter_jit
-    def __call__(
-        self, observation: jnp.ndarray, action: jnp.ndarray
-    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def __call__(self, observation: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """
         Computes the flow for a given observation and action
         """
-        return self.net(jnp.hstack([observation, action]))
+        return self.net(observation)
 
 
+# TODO: Cleanup excessive mask args
 def flow_matching_loss(
     flow_net: FlowNetwork,
     states,
     rewards,
-    episode_mask,
+    dones,
     transition_function,
     inverse_transition_function,
     state_encoding_function,
@@ -42,42 +44,34 @@ def flow_matching_loss(
     (https://papers.nips.cc/paper/2021/file/e614f646836aaed9f89ce58e837e2310-Paper.pdf)
     """
 
-    def inflow_loss(state):
-        tree = inverse_transition_function(state)
-        return (
-            jax.vmap(
-                lambda parent, action, valid: valid
-                * jnp.exp(flow_net(state_encoding_function(parent), action)),
-                0,
-            )(tree["states"], tree["actions"], tree["valid"]).sum()
-            + epsilon
-        )
-
-    def outflow_loss(state, reward):
-        tree = transition_function(state)
-        return (
-            jax.vmap(
-                lambda action, valid: valid
-                * jnp.exp(flow_net(state_encoding_function(state), action)),
-                0,
-            )(tree["actions"], tree["valid"]).sum()
-            + epsilon
-            + reward
-        )
-
-    def loss(state, reward, mask):
+    def sum_exp_inflow(state):
         parents = inverse_transition_function(state)
-        n_valid = jnp.sum(parents["valid"])
-        return mask * jax.lax.cond(
-            n_valid > 0,
-            lambda _: jax.lax.integer_pow(
-                jnp.log(inflow_loss(state)) - jnp.log(outflow_loss(state, reward)),
-                2,
-            ),
-            lambda _: 0.0,
-            None,
+        parents_action_prob = jax.vmap(
+            lambda s, a: flow_net(state_encoding_function(s))[a]
+        )(parents["states"], parents["actions"])
+        return jax.vmap(lambda v, p: v * jnp.exp(p))(
+            parents["valid"], parents_action_prob
+        ).sum()
+
+    def sum_exp_outflow(state):
+        children = transition_function(state)
+        actions_probs = flow_net(state_encoding_function(state))
+
+        return jax.vmap(lambda v, a: v * jnp.exp(a))(
+            jnp.concatenate([children["valid"], jnp.array([1.0])]), actions_probs
+        ).sum()
+
+    def loss(idx, state, reward, is_terminal):
+        is_source = (idx == 0) | (dones[idx - 1])
+        inflow = jnp.log(sum_exp_inflow(state) + epsilon)
+        outflow = jnp.log(
+            is_terminal * sum_exp_outflow(state) + epsilon  +  (1 - is_terminal) * reward
         )
+
+        # jax.debug.print("{x} {y} {z}", x=inflow, y=outflow, z=inflow - outflow)
+
+        return is_source * jax.lax.integer_pow(inflow - outflow, 2)
 
     return jax.vmap(
         loss,
-    )(states, rewards, episode_mask).sum()
+    )(jnp.arange(0, states.shape[0]), states, rewards, dones).sum()
