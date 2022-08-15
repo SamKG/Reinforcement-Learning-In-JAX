@@ -10,6 +10,6 @@ Here I list some high-level benefits of this approach, in no particular order:
 There are certainly some tradeoffs to using JAX as well:
 
 1. **Early stages**: JAX is still extremely early in development. There's a lot of moving parts, and the API or other functionality could change at any point. Moreover, setting up JAX can sometimes be a bit annoying - I had to manually export the path to CUDA-11.7 as JAX wouldn't find it automatically. Moreover, it's sometimes not obvious why performance is poor for certain segments of code.
-2. **Compability**: JAX relies heavily on JIT compilation for performant execution - however, JIT compilation functionality currently depends on using only pure functions. Notably, this means that environments such as OpenAI Gym will not benefit from JIT compilation to the same extent as a pure version of gym. 
+2. **Compatibility**: JAX relies heavily on JIT compilation for performant execution - however, JIT compilation functionality currently depends on using only pure functions. Notably, this means that environments such as OpenAI Gym will not benefit from JIT compilation to the same extent as a pure version of gym. 
 
 
