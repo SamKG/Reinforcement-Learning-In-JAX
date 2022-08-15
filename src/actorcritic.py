@@ -13,7 +13,7 @@ class MLP(eqx.Module):
         self,
         features: List[int],
         key: jax.random.KeyArray,
-        activation_fn: Callable[[jnp.ndarray], jnp.ndarray] = jax.nn.tanh,
+        activation_fn: Callable[[jnp.ndarray], jnp.ndarray] = jax.nn.leaky_relu
     ):
         keys = jax.random.split(key, len(features) - 1)
         self.layers = [
